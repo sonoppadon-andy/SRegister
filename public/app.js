@@ -1,7 +1,7 @@
 'use strict';
 // All data is rendered with textContent (never innerHTML) to prevent XSS.
 
-const state = { config: { appName: 'ระบบแจ้งเคลมประกัน', claimForm: [], statuses: [], privacyNoticeUrl: '' }, me: null, view: null };
+const state = { config: { appName: 'ระบบแจ้งเคลมประกัน', claimForm: [], statuses: [], privacyNoticeUrl: '', turnstileSiteKey: '' }, me: null, view: null };
 const root = document.getElementById('app');
 
 /* ================= helpers ================= */
@@ -63,6 +63,7 @@ function field(id, label, control, { required, hint } = {}) {
 
 /** Shared "enter the 6-digit code" step. onVerify(code) must throw Error(message) on failure. */
 function codeStep(panel, msg, { email, info, onVerify, onResend, onBack }) {
+  const slot = el('div', { class: 'captcha' });
   const input = el('input', { class: 'input code', id: 'code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6', pattern: '[0-9]{6}', required: true });
   const btn = el('button', { class: 'btn full', type: 'submit', text: 'ยืนยันรหัส' });
   const resend = el('button', { class: 'link', type: 'button' });
@@ -75,14 +76,15 @@ function codeStep(panel, msg, { email, info, onVerify, onResend, onBack }) {
   tick();
   resend.addEventListener('click', async () => {
     resend.disabled = true;
-    try { setMsg(msg, await onResend()); left = 60; clearTimeout(timer); tick(); }
+    try { setMsg(msg, await onResend(slot)); left = 60; clearTimeout(timer); tick(); }
     catch (err) { setMsg(msg, err.message, true); resend.disabled = false; }
   });
   input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0, 6); });
   const form = el('form', { novalidate: true },
     field('code', 'รหัส 6 หลักจากอีเมล', input),
     btn,
-    el('div', { class: 'row-actions' }, el('button', { class: 'link', type: 'button', text: 'ย้อนกลับ', onclick: () => { clearTimeout(timer); onBack(); } }), resend));
+    el('div', { class: 'row-actions' }, el('button', { class: 'link', type: 'button', text: 'ย้อนกลับ', onclick: () => { clearTimeout(timer); onBack(); } }), resend),
+    slot);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!/^\d{6}$/.test(input.value)) return setMsg(msg, 'กรุณากรอกรหัส 6 หลัก', true);
@@ -98,6 +100,44 @@ function codeStep(panel, msg, { email, info, onVerify, onResend, onBack }) {
   input.focus();
 }
 
+/* ================= CAPTCHA (Cloudflare Turnstile) ================= */
+
+const captcha = {
+  loading: null,
+  load() {
+    if (!state.config.turnstileSiteKey) return Promise.resolve(false);
+    if (window.turnstile) return Promise.resolve(true);
+    this.loading ||= new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+      s.async = true;
+      s.onload = () => ok(true);
+      s.onerror = () => { this.loading = null; fail(new Error('โหลดระบบตรวจสอบความปลอดภัยไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่')); };
+      document.head.append(s);
+    });
+    return this.loading;
+  },
+  /** Gets a fresh single-use token. The widget only becomes visible if Cloudflare needs the user to interact. */
+  async token(slot, action) {
+    if (!(await this.load())) return '';
+    if (slot.dataset.widget) { try { window.turnstile.remove(slot.dataset.widget); } catch { /* ignore */ } }
+    slot.replaceChildren();
+    return new Promise((ok, fail) => {
+      const fails = (m) => () => fail(new Error(m));
+      slot.dataset.widget = window.turnstile.render(slot, {
+        sitekey: state.config.turnstileSiteKey,
+        action,
+        appearance: 'interaction-only',
+        language: 'auto',
+        callback: ok,
+        'error-callback': fails('การตรวจสอบความปลอดภัยไม่สำเร็จ กรุณาลองใหม่'),
+        'timeout-callback': fails('หมดเวลาตรวจสอบความปลอดภัย กรุณาลองใหม่'),
+        'expired-callback': () => {},
+      });
+    });
+  },
+};
+
 /* ================= LOGIN ================= */
 
 function authShell() {
@@ -112,19 +152,23 @@ function showLogin(notice, prefill = '') {
   const { panel, msg } = authShell();
   const input = el('input', { class: 'input', id: 'email', type: 'email', autocomplete: 'email', required: true, value: prefill });
   const btn = el('button', { class: 'btn full', type: 'submit', text: 'ส่งรหัสเข้าสู่ระบบ' });
-  const form = el('form', { novalidate: true }, field('email', 'อีเมล', input), btn);
-  const request = (email) => api('/api/auth/request-otp', { body: { email } }).then((r) => r.message);
+  const slot = el('div', { class: 'captcha' });
+  const form = el('form', { novalidate: true }, field('email', 'อีเมล', input), slot, btn);
+  const request = async (email, where = slot) => {
+    const captchaToken = await captcha.token(where, 'login');
+    return (await api('/api/auth/request-otp', { body: { email, captchaToken } })).message;
+  };
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = input.value.trim();
     if (!email) return setMsg(msg, 'กรุณากรอกอีเมล', true);
-    busy(btn, true, 'กำลังส่งรหัส…');
+    busy(btn, true, 'กำลังตรวจสอบ…');
     try {
       const info = await request(email);
       codeStep(panel, msg, {
         email, info,
-        onResend: () => request(email),
+        onResend: (where) => request(email, where),
         onBack: () => showLogin('', email),
         onVerify: async (code) => { await api('/api/auth/verify-otp', { body: { email, code } }); await startApp(); },
       });
@@ -158,6 +202,7 @@ function showRegister(prev = {}) {
     ? el('a', { href: state.config.privacyNoticeUrl, target: '_blank', rel: 'noopener', text: 'ประกาศความเป็นส่วนตัว' })
     : 'ประกาศความเป็นส่วนตัวของบริษัท';
   const btn = el('button', { class: 'btn full', type: 'submit', text: 'ส่งรหัสยืนยันไปที่อีเมล' });
+  const slot = el('div', { class: 'captcha' });
 
   const form = el('form', { novalidate: true },
     field('r-email', 'อีเมล', c.email, { required: true, hint: 'ใช้อีเมลของคุณเอง ระบบจะส่งรหัสยืนยันไปที่อีเมลนี้' }),
@@ -167,6 +212,7 @@ function showRegister(prev = {}) {
     field('r-projects', 'โครงการที่ต้องการแจ้งเคลม', c.requestedProjects, { required: true, hint: 'ถ้ามีหลายโครงการ คั่นด้วยเครื่องหมายจุลภาค (,)' }),
     field('r-reason', 'ความเกี่ยวข้องกับโครงการ / หมายเหตุ', c.reason),
     el('div', { class: 'check' }, consent, el('label', { for: 'r-consent' }, 'ข้าพเจ้ายินยอมให้บริษัทเก็บและใช้ข้อมูลข้างต้นเพื่อพิจารณาสิทธิ์และดำเนินการเรื่องเคลม ตาม', ' ', privacy)),
+    slot,
     btn);
 
   form.addEventListener('submit', async (e) => {
@@ -176,8 +222,11 @@ function showRegister(prev = {}) {
       if (!data[k]) { c[k].focus(); return setMsg(msg, 'กรุณากรอกข้อมูลที่มีเครื่องหมาย * ให้ครบ', true); }
     }
     if (!consent.checked) return setMsg(msg, 'กรุณายอมรับการเก็บและใช้ข้อมูลส่วนบุคคล', true);
-    busy(btn, true, 'กำลังส่งรหัส…');
-    const send = () => api('/api/auth/register-start', { body: { ...data, consent: true } }).then((r) => r.message);
+    busy(btn, true, 'กำลังตรวจสอบ…');
+    const send = async (where = slot) => {
+      const captchaToken = await captcha.token(where, 'register');
+      return (await api('/api/auth/register-start', { body: { ...data, consent: true, captchaToken } })).message;
+    };
     try {
       const info = await send();
       codeStep(panel, msg, {

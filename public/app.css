@@ -251,3 +251,5 @@ td.wrap { white-space: normal; min-width: 14rem; }
   .status.s-rejected, .status.s-suspended, .status.s-expired { background: #3b1a1b; color: #f2a5a2; }
 }
 @media (max-width: 760px) { .access { grid-template-columns: 1fr; } }
+.captcha:empty { display: none; }
+.captcha { margin: .25rem 0 1rem; min-height: 0; }

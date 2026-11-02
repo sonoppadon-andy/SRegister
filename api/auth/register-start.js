@@ -5,6 +5,7 @@ import { getUser, isAdminEmail, STATUS } from '../../lib/users.js';
 import { newCode, saveOtp, otpEmailHtml } from '../../lib/otp.js';
 import { sendMail, layout } from '../../lib/mail.js';
 import { audit } from '../../lib/audit.js';
+import { verifyCaptcha, CAPTCHA_FAILED } from '../../lib/captcha.js';
 import { appName, env } from '../../lib/config.js';
 
 const GENERIC = { ok: true, message: 'ระบบส่งรหัสยืนยันไปที่อีเมลแล้ว (ถ้าอีเมลนี้ยังไม่เคยลงทะเบียน) กรุณาตรวจสอบกล่องจดหมาย' };
@@ -31,6 +32,12 @@ export default handle(async (req, res) => {
   if (!(await rateLimit(`rl:reg:ip:${ip}`, 5, 3600)) || !(await rateLimit(`rl:reg:em:${email}`, 3, 900))) {
     await audit('register_rate_limited', { email, ip });
     return json(res, 429, { error: 'ทำรายการบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่' });
+  }
+
+  const captcha = await verifyCaptcha(b.captchaToken, ip, 'register');
+  if (!captcha.ok) {
+    await audit('captcha_failed', { email, ip, action: 'register', reason: captcha.reason });
+    return json(res, 400, { error: CAPTCHA_FAILED, captcha: true });
   }
 
   // Never reveal whether an email is already registered.
