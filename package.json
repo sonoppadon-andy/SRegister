@@ -1,0 +1,14 @@
+{
+  "name": "singhaestate-claim-portal",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Phase 1: registration with email one-time code, admin approval, claim requests (no SharePoint yet)",
+  "engines": {
+    "node": "22.x"
+  },
+  "dependencies": {
+    "@upstash/redis": "1.34.3",
+    "@vercel/oidc": "4.0.0"
+  }
+}
