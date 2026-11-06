@@ -1,7 +1,7 @@
 import { handle, json, requirePostJson, normEmail, clientIp, log } from '../../lib/http.js';
 import { hit } from '../../lib/memlimit.js';
 import { verifyCaptcha, CAPTCHA_FAILED } from '../../lib/captcha.js';
-import { newCode, createChallenge, ttlMinutes } from '../../lib/otp-token.js';
+import { newCode, createChallenge, ttlMinutes, PURPOSES } from '../../lib/otp-token.js';
 import { sendMail, layout } from '../../lib/mail.js';
 import { appName, env } from '../../lib/config.js';
 
@@ -16,6 +16,7 @@ export default handle(async (req, res) => {
   const email = normEmail(req.body?.email);
   const ip = clientIp(req);
   if (!email) return json(res, 400, { error: 'กรุณากรอกอีเมลให้ถูกต้อง' });
+  const purpose = PURPOSES.includes(req.body?.purpose) ? req.body.purpose : 'login';
   if (!domainAllowed(email)) {
     log('otp_domain_blocked', { email, ip });
     return json(res, 400, { error: 'ช่วงทดสอบนี้ส่งรหัสได้เฉพาะอีเมลที่ได้รับอนุญาตเท่านั้น' });
@@ -33,16 +34,16 @@ export default handle(async (req, res) => {
   }
 
   const code = newCode();
-  const { challenge, expiresAt } = createChallenge(email, code);
+  const { challenge, expiresAt } = createChallenge(email, code, purpose);
   await sendMail({
     to: [email],
-    subject: `รหัสยืนยันอีเมล ${appName()}`,
+    subject: `${purpose === 'register' ? 'รหัสยืนยันการลงทะเบียน' : 'รหัสเข้าสู่ระบบ'} ${appName()}`,
     html: layout(`<p>รหัสยืนยันอีเมลของคุณคือ</p>
       <p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p>
       <p>รหัสนี้หมดอายุใน ${ttlMinutes()} นาที</p>
       <p style="color:#5b6672">ห้ามบอกรหัสนี้กับผู้อื่น เจ้าหน้าที่จะไม่ขอรหัสนี้จากคุณ<br>
       ถ้าคุณไม่ได้ทำรายการนี้ ให้เพิกเฉยต่ออีเมลนี้</p>`),
   });
-  log('otp_sent', { email, ip });
+  log('otp_sent', { email, ip, purpose });
   return json(res, 200, { ok: true, challenge, expiresAt, message: `ส่งรหัส 6 หลักไปที่ ${email} แล้ว` });
 });

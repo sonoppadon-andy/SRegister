@@ -1,6 +1,7 @@
 import { handle, json, requirePostJson, clientIp, log } from '../../lib/http.js';
 import { hit } from '../../lib/memlimit.js';
 import { checkChallenge } from '../../lib/otp-token.js';
+import { createSession } from '../../lib/session.js';
 
 // Best-effort (per instance): attempts per challenge and challenges already used.
 const used = new Map();
@@ -10,6 +11,7 @@ const MESSAGES = {
   invalid: 'รหัสไม่ถูกต้อง ตรวจสอบรหัสในอีเมลแล้วลองอีกครั้ง',
   locked: 'กรอกรหัสผิดหลายครั้ง กรุณาขอรหัสใหม่',
   used: 'รหัสนี้ถูกใช้แล้ว กรุณาขอรหัสใหม่',
+  'wrong-purpose': 'รหัสนี้ใช้สำหรับการลงทะเบียน ไม่ใช่การเข้าสู่ระบบ',
   default: 'รหัสไม่ถูกต้องหรือหมดอายุ กรุณาขอรหัสใหม่',
 };
 
@@ -28,7 +30,7 @@ export default handle(async (req, res) => {
     return json(res, 401, { error: MESSAGES.locked });
   }
 
-  const r = checkChallenge(challenge, code);
+  const r = checkChallenge(challenge, code, 'login');
   if (!r.ok) {
     log('otp_failed', { ip, email: r.email, reason: r.reason });
     return json(res, 401, { error: MESSAGES[r.reason] || MESSAGES.default });
@@ -36,6 +38,7 @@ export default handle(async (req, res) => {
 
   if (used.size > 5000) for (const [k, t] of used) if (t < Date.now()) used.delete(k);
   used.set(nonce, Date.now() + 3600_000);
+  createSession(res, r.email);
   log('otp_verified', { ip, email: r.email });
   return json(res, 200, { ok: true, email: r.email });
 });

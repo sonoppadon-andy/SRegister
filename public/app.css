@@ -253,3 +253,8 @@ td.wrap { white-space: normal; min-width: 14rem; }
 @media (max-width: 760px) { .access { grid-template-columns: 1fr; } }
 .captcha:empty { display: none; }
 .captcha { margin: .25rem 0 1rem; min-height: 0; }
+
+.banner { background: #fff1d6; color: #6b4a00; border-radius: var(--radius-s); padding: .6rem .9rem; font-size: .9rem; margin: 0 0 1.25rem; }
+@media (prefers-color-scheme: dark) { .banner { background: #3a2f12; color: #f3d27a; } }
+ul.plain { margin: .5rem 0 0; padding-left: 1.2rem; }
+ul.plain li { margin: .25rem 0; }
