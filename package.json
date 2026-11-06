@@ -1,14 +1,13 @@
 {
-  "name": "singhaestate-claim-portal",
-  "version": "1.0.0",
+  "name": "singhaestate-otp-email",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Phase 1: registration with email one-time code, admin approval, claim requests (no SharePoint yet)",
+  "description": "Test version: send a one-time code by email and verify it (no database)",
   "engines": {
     "node": "22.x"
   },
   "dependencies": {
-    "@upstash/redis": "1.34.3",
     "@vercel/oidc": "4.0.0"
   }
 }
